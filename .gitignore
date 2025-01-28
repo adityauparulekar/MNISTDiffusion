@@ -1,1 +1,8 @@
+todo.txt
 .vscode
+__*
+datasets/*
+models/*
+images/*
+*.png
+*.ipynb

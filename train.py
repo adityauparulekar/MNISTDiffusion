@@ -2,7 +2,10 @@ import torch
 import torch.nn as nn
 from torchvision.datasets import MNIST
 from torchvision import transforms 
+from tqdm import tqdm
 from torchvision.utils import save_image
+from sampler import FMNISTSampler, MNISTSampler
+from sampler import ComboSampler
 from torch.utils.data import DataLoader
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import OneCycleLR
@@ -46,17 +49,25 @@ def parse_args():
     parser.add_argument('--model_ema_steps',type = int,help = 'ema model evaluation interval',default=10)
     parser.add_argument('--model_ema_decay',type = float,help = 'ema model decay',default=0.995)
     parser.add_argument('--log_freq',type = int,help = 'training log message printing frequence',default=10)
+    parser.add_argument('--device', type=str, help='device to run on, either cuda:0-7 or cpu', default='cuda:0')
+    parser.add_argument('--name', type=str, help='name of the experiment', default='exp')
+    parser.add_argument('--mnist_p', type=float, help='percent of mnist in dataset', default=0.5)
+    parser.add_argument('--lr_correction', action='store_true')
+    parser.add_argument('--dataset', type=str, default='mnist')
     parser.add_argument('--no_clip',action='store_true',help = 'set to normal sampling method without clip x_0 which could yield unstable samples')
-    parser.add_argument('--cpu',action='store_true',help = 'cpu training')
-
     args = parser.parse_args()
 
     return args
 
 
 def main(args):
-    device="cpu" if args.cpu else "cuda"
-    train_dataloader,test_dataloader=create_mnist_dataloaders(batch_size=args.batch_size,image_size=28)
+    device = args.device
+    if args.dataset == 'mnist':
+        train_dataloader = MNISTSampler(args)
+    elif args.dataset == 'fmnist':
+        train_dataloader = FMNISTSampler(args)
+    elif args.dataset == 'combo':
+        train_dataloader = ComboSampler(args)
     model=MNISTDiffusion(timesteps=args.timesteps,
                 image_size=28,
                 in_channels=1,
@@ -71,7 +82,7 @@ def main(args):
     model_ema = ExponentialMovingAverage(model, device=device, decay=1.0 - alpha)
 
     optimizer=AdamW(model.parameters(),lr=args.lr)
-    scheduler=OneCycleLR(optimizer,args.lr,total_steps=args.epochs*len(train_dataloader),pct_start=0.25,anneal_strategy='cos')
+    scheduler=OneCycleLR(optimizer,args.lr,total_steps=args.epochs*train_dataloader.length,pct_start=0.25,anneal_strategy='cos')
     loss_fn=nn.MSELoss(reduction='mean')
 
     #load checkpoint
@@ -82,31 +93,57 @@ def main(args):
 
     global_steps=0
     for i in range(args.epochs):
+        progress_bar = tqdm(total=train_dataloader.length)
+        progress_bar.set_description(f"Epoch {i}")
+        model_ema.train()
         model.train()
-        for j,(image,target) in enumerate(train_dataloader):
+        for j,(image, labels) in enumerate(train_dataloader):
             noise=torch.randn_like(image).to(device)
             image=image.to(device)
             pred=model(image,noise)
+
+            if args.lr_correction:
+                true_bias = [0.5, 0.5]
+                alt_bias = [args.mnist_p, 1.0-args.mnist_p]
+                upweights = [true_bias[l] / alt_bias[l] for l in labels]
+                for ind in range(len(noise)):
+                    noise[ind] *= math.sqrt(upweights[ind])
+                    pred[ind] *= math.sqrt(upweights[ind])
+
             loss=loss_fn(pred,noise)
+            
             loss.backward()
             optimizer.step()
             optimizer.zero_grad()
             scheduler.step()
+            
+            progress_bar.update(1)
+            logs = {
+                "loss" : loss.detach().item(),
+                "lr" : scheduler.get_last_lr()[0],
+                "mnist": train_dataloader.num_mnist,
+                "fmnist": train_dataloader.num_fmnist,
+            }
+            progress_bar.set_postfix(**logs)
             if global_steps%args.model_ema_steps==0:
                 model_ema.update_parameters(model)
             global_steps+=1
-            if j%args.log_freq==0:
-                print("Epoch[{}/{}],Step[{}/{}],loss:{:.5f},lr:{:.5f}".format(i+1,args.epochs,j,len(train_dataloader),
-                                                                    loss.detach().cpu().item(),scheduler.get_last_lr()[0]))
         ckpt={"model":model.state_dict(),
                 "model_ema":model_ema.state_dict()}
 
-        os.makedirs("results",exist_ok=True)
-        torch.save(ckpt,"results/steps_{:0>8}.pt".format(global_steps))
+        os.makedirs("models",exist_ok=True)
+        torch.save(ckpt,f"models/{args.name}.pt")
 
-        model_ema.eval()
-        samples=model_ema.module.sampling(args.n_samples,clipped_reverse_diffusion=not args.no_clip,device=device)
-        save_image(samples,"results/steps_{:0>8}.png".format(global_steps),nrow=int(math.sqrt(args.n_samples)))
+        if i % 5 == 0:
+            model_ema.eval()
+            samples = sample(model_ema, args, device)
+            print("DISPLAYING IMAGE")
+            os.makedirs("images",exist_ok=True)
+            save_image(samples,f"images/{args.name}.png",nrow=int(math.sqrt(args.n_samples)))
+
+def sample(model_ema, args, device, seed=2025):
+    torch.manual_seed(seed)
+    return model_ema.module.sampling(args.n_samples,clipped_reverse_diffusion=not args.no_clip,device=device)
 
 if __name__=="__main__":
     args=parse_args()

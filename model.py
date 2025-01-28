@@ -33,7 +33,7 @@ class MNISTDiffusion(nn.Module):
         return pred_noise
 
     @torch.no_grad()
-    def sampling(self,n_samples,clipped_reverse_diffusion=True,device="cuda"):
+    def sampling(self,n_samples,clipped_reverse_diffusion=True,device="cuda:0"):
         x_t=torch.randn((n_samples,self.in_channels,self.image_size,self.image_size)).to(device)
         for i in tqdm(range(self.timesteps-1,-1,-1),desc="Sampling"):
             noise=torch.randn_like(x_t).to(device)
