@@ -5,7 +5,7 @@ from unet import Unet
 from tqdm import tqdm
 
 class MNISTDiffusion(nn.Module):
-    def __init__(self,image_size,in_channels,time_embedding_dim=256,timesteps=1000,base_dim=32,dim_mults= [1, 2, 4, 8]):
+    def __init__(self,image_size,in_channels,time_embedding_dim=256,timesteps=1000,base_dim=32,dim_mults= [1, 2, 4, 8], small_input=False):
         super().__init__()
         self.timesteps=timesteps
         self.in_channels=in_channels
@@ -22,11 +22,13 @@ class MNISTDiffusion(nn.Module):
         self.register_buffer("sqrt_alphas_cumprod",torch.sqrt(alphas_cumprod))
         self.register_buffer("sqrt_one_minus_alphas_cumprod",torch.sqrt(1.-alphas_cumprod))
 
-        self.model=Unet(timesteps,time_embedding_dim,in_channels,in_channels,base_dim,dim_mults)
+        self.model=Unet(timesteps,time_embedding_dim,in_channels,in_channels,base_dim,dim_mults,small_input=small_input)
 
-    def forward(self,x,noise):
+    def forward(self,x,noise,t=None):
         # x:NCHW
-        t=torch.randint(0,self.timesteps,(x.shape[0],)).to(x.device)
+        if t == None:
+            t=torch.randint(0,self.timesteps,(x.shape[0],)).to(x.device)
+        assert len(t) == len(x)
         x_t=self._forward_diffusion(x,t,noise)
         pred_noise=self.model(x_t,t)
 

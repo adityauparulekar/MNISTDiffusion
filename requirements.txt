@@ -1,4 +1,8 @@
 torch
+pandas
 torchvision
 tqdm
 argparse
+jupyter
+matplotlib
+diffusers

@@ -8,8 +8,8 @@ from tqdm import tqdm
 import diffusers
 
 class Classifier():
-    def __init(self, args):
-        self.save_file = args["save_file"]
+    def __init__(self, args):
+        self.save_file = args.save_file
         
         self.device = torch.device(args.device)
 
@@ -27,7 +27,7 @@ class Classifier():
             progress_bar.set_description(f"Epoch {epoch}")
 
             running_loss = 0.0
-            for i, (inputs, labels, _) in enumerate(trainloader, 0):
+            for i, (inputs, labels) in enumerate(trainloader, 0):
                 # zero the parameter gradients
 
                 self.optimizer.zero_grad()
@@ -65,3 +65,9 @@ class Classifier():
         checkpoint = torch.load(PATH)
         self.net.load_state_dict(checkpoint['net'])
         self.net.train()
+
+    def classify(self, x):
+        return torch.argmax(torch.softmax(self.net(x), 1), dim=1)
+    
+    def classify_raw(self, x):
+        return self.net(x)

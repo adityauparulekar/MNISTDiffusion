@@ -49,13 +49,13 @@ class ResidualDownsample(nn.Module):
     '''
     shufflenet_v2 unit for spatial down sampling(https://arxiv.org/pdf/1807.11164.pdf)
     '''
-    def __init__(self,in_channels,out_channels):
+    def __init__(self,in_channels,out_channels, stride=2):
         super().__init__()
-        self.branch1=nn.Sequential(nn.Conv2d(in_channels,in_channels,3,2,1,groups=in_channels),
+        self.branch1=nn.Sequential(nn.Conv2d(in_channels,in_channels,3,stride=stride,padding=1,groups=in_channels),
                                     nn.BatchNorm2d(in_channels),
                                     ConvBnSiLu(in_channels,out_channels//2,1,1,0))
         self.branch2=nn.Sequential(ConvBnSiLu(in_channels,out_channels//2,1,1,0),
-                                    nn.Conv2d(out_channels//2,out_channels//2,3,2,1,groups=out_channels//2),
+                                    nn.Conv2d(out_channels//2,out_channels//2,3,stride=stride,padding=1,groups=out_channels//2),
                                     nn.BatchNorm2d(out_channels//2),
                                     ConvBnSiLu(out_channels//2,out_channels//2,1,1,0))
         self.channel_shuffle=ChannelShuffle(2)
@@ -83,13 +83,13 @@ class TimeMLP(nn.Module):
         return self.act(x)
     
 class EncoderBlock(nn.Module):
-    def __init__(self,in_channels,out_channels,time_embedding_dim):
+    def __init__(self,in_channels,out_channels,time_embedding_dim,stride=2):
         super().__init__()
         self.conv0=nn.Sequential(*[ResidualBottleneck(in_channels,in_channels) for i in range(3)],
                                     ResidualBottleneck(in_channels,out_channels//2))
 
         self.time_mlp=TimeMLP(embedding_dim=time_embedding_dim,hidden_dim=out_channels,out_dim=out_channels//2)
-        self.conv1=ResidualDownsample(out_channels//2,out_channels)
+        self.conv1=ResidualDownsample(out_channels//2,out_channels,stride=stride)
     
     def forward(self,x,t=None):
         x_shortcut=self.conv0(x)
@@ -100,9 +100,9 @@ class EncoderBlock(nn.Module):
         return [x,x_shortcut]
         
 class DecoderBlock(nn.Module):
-    def __init__(self,in_channels,out_channels,time_embedding_dim):
+    def __init__(self,in_channels,out_channels,time_embedding_dim,upsample_scale=2):
         super().__init__()
-        self.upsample=nn.Upsample(scale_factor=2,mode='bilinear',align_corners=False)
+        self.upsample = nn.Upsample(scale_factor=upsample_scale, mode='bilinear', align_corners=False) 
         self.conv0=nn.Sequential(*[ResidualBottleneck(in_channels,in_channels) for i in range(3)],
                                     ResidualBottleneck(in_channels,in_channels//2))
 
@@ -123,7 +123,7 @@ class Unet(nn.Module):
     '''
     simple unet design without attention
     '''
-    def __init__(self,timesteps,time_embedding_dim,in_channels=3,out_channels=2,base_dim=32,dim_mults=[2,4,8,16]):
+    def __init__(self,timesteps,time_embedding_dim,in_channels=3,out_channels=2,base_dim=32,dim_mults=[2,4,8,16], small_input=False):
         super().__init__()
         assert isinstance(dim_mults,(list,tuple))
         assert base_dim%2==0 
@@ -133,8 +133,11 @@ class Unet(nn.Module):
         self.init_conv=ConvBnSiLu(in_channels,base_dim,3,1,1)
         self.time_embedding=nn.Embedding(timesteps,time_embedding_dim)
 
-        self.encoder_blocks=nn.ModuleList([EncoderBlock(c[0],c[1],time_embedding_dim) for c in channels])
-        self.decoder_blocks=nn.ModuleList([DecoderBlock(c[1],c[0],time_embedding_dim) for c in channels[::-1]])
+        # Set stride and upsample factor based on the input size flag
+        down_stride = 1 if small_input else 2
+        up_scale = 1 if small_input else 2
+        self.encoder_blocks = nn.ModuleList([EncoderBlock(c[0], c[1], time_embedding_dim, stride=down_stride) for c in channels])
+        self.decoder_blocks = nn.ModuleList([DecoderBlock(c[1], c[0], time_embedding_dim, upsample_scale=up_scale)for c in channels[::-1]]) 
     
         self.mid_block=nn.Sequential(*[ResidualBottleneck(channels[-1][1],channels[-1][1]) for i in range(2)],
                                         ResidualBottleneck(channels[-1][1],channels[-1][1]//2))
