@@ -14,6 +14,7 @@ from utils import ExponentialMovingAverage
 import os, sys
 import math
 import argparse
+import numpy as np
 import pandas as pd
 
 def norm_sum(a, b):
@@ -39,7 +40,37 @@ def create_mnist_dataloaders(batch_size,image_size=28,num_workers=4):
     return DataLoader(train_dataset,batch_size=batch_size,shuffle=True,num_workers=num_workers),\
             DataLoader(test_dataset,batch_size=batch_size,shuffle=True,num_workers=num_workers)
 
+def process_weights_df(df):
+    df = df.set_index(['image_idx'])
+    df['grad_norm'] /= df['grad_norm'].mean()
+    df['grad_norm'] = df['grad_norm'].clip(lower=0, upper=8)
+    df['grad_norm'] /= df['grad_norm'].mean()
+    # df['grad_norm'] = 1/df['grad_norm']
+    M = df['grad_norm'].max()
+    return (df, M)
 
+def load_weights(f_name):
+    f = open(f_name)
+    lines = f.readlines()
+    a = []
+    print(len(lines))
+    for l in lines:
+        for x in eval(l):
+            a.append(x)
+    df = pd.DataFrame(a)
+    return process_weights_df(df)
+
+def get_weights(weights, indices, device):
+    return torch.tensor([weights['grad_norm'].get(idx.item(), 1) for idx in indices], device=device)
+    # return torch.tensor(weights.loc[indices]['grad_norm'].to_numpy(), device=device)
+
+def rejection_sample(images, indices, weights, M, device):
+    inds = indices.squeeze()
+    upweights = get_weights(weights, indices, device)
+    u = torch.rand(len(inds), device=device)
+    reweight_images = images[u < upweights / M]
+    upweights = upweights[u < upweights / M]
+    return reweight_images, upweights
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Training MNISTDiffusion")
@@ -56,11 +87,12 @@ def parse_args():
     parser.add_argument('--device', type=str, help='device to run on, either cuda:0-7 or cpu', default='cuda:0')
     parser.add_argument('--name', type=str, help='name of the experiment', default='exp')
     parser.add_argument('--mnist_p', type=float, help='percent of mnist in dataset', default=0.5)
-    parser.add_argument('--lr_correction', action='store_true')
-    parser.add_argument('--bias_correction', action='store_true')
+    parser.add_argument('--grad_correction', type=str, default=None)
+    parser.add_argument('--z_reps', type=int, default=1)
+    parser.add_argument('--track_losses', type=str, default=None)
+    parser.add_argument('--reweight_m', type=float, default=1)
     parser.add_argument('--dataset', type=str, default='mnist')
     parser.add_argument('--no_clip',action='store_true',help = 'set to normal sampling method without clip x_0 which could yield unstable samples')
-    parser.add_argument('--store_errors', action='store_true')
     args = parser.parse_args()
 
     return args
@@ -68,7 +100,7 @@ def parse_args():
 
 def main(args):
     x = 1
-    log_file = open('log_file.txt', 'w')
+    log_file = open('log_file.txt', 'a')
     s = str(args)
     print(s)
     log_file.write(s)
@@ -99,6 +131,11 @@ def main(args):
                     base_dim=args.model_base_dim,
                     dim_mults=[2,4]).to(device)
 
+    if args.grad_correction:
+        weights, M = load_weights(args.grad_correction)
+        print(M)
+    if args.track_losses:
+        loss_file = open(args.track_losses, 'a')
     #torchvision ema setting
     #https://github.com/pytorch/vision/blob/main/references/classification/train.py#L317
     adjust = 1* args.batch_size * args.model_ema_steps / args.epochs
@@ -119,72 +156,68 @@ def main(args):
     global_steps=0
     errors_list = []
 
-    if args.store_errors or args.lr_correction:
-        df = pd.read_csv("errors.csv")
-        avg_error = df['error'].mean()
-        df_errors = df.groupby(['image_idx', 'dataset']).mean()['error']
     for i in range(args.epochs):
         progress_bar = tqdm(total=train_dataloader.length)
         progress_bar.set_description(f"Epoch {i}")
         model_ema.train()
         model.train()
+        avg_loss_this_epoch = 0
+        count = 0
+        num_images = 0
         for j,(images, labels, indices) in enumerate(train_dataloader):
-            noise=torch.randn_like(images).to(device)
+
             images=images.to(device)
-            pred=model(images,noise)
-            if args.lr_correction:
-                print("SHOULDNT BE HERE EITHER")
-                error_inds = torch.stack((indices, labels), dim=1).tolist()
-                errors = df_errors.groupby(['image_idx', 'dataset']).mean()[error_inds].tolist()
-                upweights = avg_error / errors
-                for ind in range(len(noise)):
-                    noise[ind] *= math.sqrt(upweights[ind])
-                    pred[ind] *= math.sqrt(upweights[ind])
-            elif args.bias_correction:
-                print("OR HERE")
-                true_bias = [0.5, 0.5]
-                alt_bias = [args.mnist_p, 1.0-args.mnist_p]
-                upweights = [true_bias[l] / alt_bias[l] for l in labels]
-                for ind in range(len(noise)):
-                    noise[ind] *= math.sqrt(upweights[ind])
-                    pred[ind] *= math.sqrt(upweights[ind])
-            loss=loss_fn(pred,noise)
-            
+            # df_t = torch.randint(0, 10, (1,)).item()*100
+
+            if args.grad_correction:
+                # weights, M = dfs[df_t]
+                reweight_images, upweights = rejection_sample(images, indices, weights, M, device)
+                reweight_noise = torch.randn_like(reweight_images).to(device)
+                if len(reweight_images) == 0:
+                    continue
+                # offset = torch.randint(0, 100, (reweight_images.shape[0],)).to(device)
+                # pred = model(reweight_images, reweight_noise, t = df_t + offset)
+                pred = model(reweight_images, reweight_noise)
+                loss_per_sample = ((pred - reweight_noise)**2).mean(dim=[1, 2, 3])
+                loss = (loss_per_sample / upweights).mean()
+                num_images += len(reweight_images)
+            else:
+                mask = torch.rand(len(images)) < 1/args.reweight_m
+                images = images[mask]
+                if len(images) == 0:
+                    continue
+                # offset = torch.randint(0, 100, (images.shape[0],)).to(device)
+                noise = torch.randn_like(images, device=device)
+                # pred = model(images, noise, t=torch.randint(0,args.timesteps,(images.shape[0],)).to(device))
+                pred = model(images, noise)
+                loss = loss_fn(pred, noise)
+                num_images += len(images)
             loss.backward()
             optimizer.step()
             optimizer.zero_grad()
             scheduler.step()
             
             ### TRACKING STUFF, NO TRAINING LOGIC BELOW ###
-            progress_bar.update(1)
             logs = {
                 "loss" : loss.detach().item(),
                 "lr" : scheduler.get_last_lr()[0],
-                # "mnist": train_dataloader.num_mnist,
-                # "fmnist": train_dataloader.num_fmnist,
             }
+            avg_loss_this_epoch += loss.detach().item()
+            count += 1
+            progress_bar.update(1)
             progress_bar.set_postfix(**logs)
             if global_steps%args.model_ema_steps==0:
                 model_ema.update_parameters(model)
             global_steps+=1
             
-            if args.store_errors and i % 10 == 0:
-                for ind in range(len(images)):
-                    image_rep = images[ind].repeat((100, 1, 1, 1))
-                    noise=torch.randn_like(image_rep).to(device)
-                    pred=model(image_rep,noise)
-                    diff = pred - noise
-                    x = torch.mean(diff**4).item()
-                    errors_list.append({
-                        'epoch': i,
-                        'image_idx': indices[ind].item(),
-                        'label': labels[ind].item(),
-                        'error': x
-                    })
             ### TRACKING STUFF, NO TRAINING LOGIC ABOVE ###
         ckpt={"model":model.state_dict(),
                 "model_ema":model_ema.state_dict()}
 
+        if args.track_losses:
+            avg_loss_this_epoch /= count
+            loss_file.write(f'{i}, {num_images}, {avg_loss_this_epoch}\n')
+            loss_file.flush()
         os.makedirs("models",exist_ok=True)
         torch.save(ckpt,f"models/{args.name}.pt")
 
@@ -194,11 +227,10 @@ def main(args):
             print("DISPLAYING IMAGE")
             os.makedirs("images",exist_ok=True)
             save_image(samples,f"images/{args.name}.png",nrow=int(math.sqrt(args.n_samples)))
-    if args.store_errors:
-        df = pd.DataFrame(errors_list)
-        df.to_csv('fmnist_weights.csv', index=False)
+    if args.track_losses:
+        loss_file.close()
 def sample(model_ema, args, device, seed=2025):
-    torch.manual_seed(seed)
+    # torch.manual_seed(seed)
     return model_ema.module.sampling(args.n_samples,clipped_reverse_diffusion=not args.no_clip,device=device)
 
 if __name__=="__main__":
