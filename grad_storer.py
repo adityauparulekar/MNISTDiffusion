@@ -37,9 +37,11 @@ parser.add_argument('--name', type=str, help='name of the experiment', default='
 parser.add_argument('--mnist_p', type=float, help='percent of mnist in dataset', default=0.5)
 parser.add_argument('--grad_correction', action='store_true')
 parser.add_argument('--z_reps', type=int, default=1)
-parser.add_argument('--track_losses', action='store_true')
+parser.add_argument('--model_file', type=str)
+parser.add_argument('--grad_file', type=str)
 parser.add_argument('--dataset', type=str, default='mnist')
 parser.add_argument('--no_clip',action='store_true',help = 'set to normal sampling method without clip x_0 which could yield unstable samples')
+parser.add_argument('--hess', action='store_true')
 parser.add_argument('--store_grads', action='store_true')
 args = parser.parse_args()
 
@@ -54,7 +56,7 @@ model=MNISTDiffusion(timesteps=args.timesteps,
                 base_dim=args.model_base_dim,
                 dim_mults=[2,4]).to(device)
 model_ema = ExponentialMovingAverage(model, device=device, decay=1.0 - alpha)
-ckpt=torch.load('models/mnist_big.pt')
+ckpt=torch.load(args.model_file)
 model_ema.load_state_dict(ckpt['model_ema'])
 model.load_state_dict(ckpt['model'])
 sampler = MNISTSampler(args)
@@ -91,10 +93,11 @@ for i, (images, labels, indices) in enumerate(sampler):
 
     loss += loss_fn(pred, noise)
 print("approximating hessian")
-hess = approx_hessian_diag(model, loss, n_probes=100)
+if args.hess:
+    hess = approx_hessian_diag(model, loss, n_probes=100)
 print("calculating grads")
 
-f = open('test.txt', 'a')
+f = open(args.grad_file, 'a')
 for i, (images, labels, indices) in enumerate(sampler):
     images=images.to(device)    
     print(i)
@@ -107,10 +110,14 @@ for i, (images, labels, indices) in enumerate(sampler):
         loss = loss_fn(pred, noise)
         loss.backward()
         total_grad_norm = 0.0
-        for param, h in zip(model.parameters(), hess):
-            if param.grad is not None:
-                # print((param.grad/h).norm())
-                total_grad_norm += (param.grad/h.clip(min=0.01)).norm()**2
+        if args.hess:
+            for param, h in zip(model.parameters(), hess):
+                if param.grad is not None:
+                    # print((param.grad/h).norm())
+                    total_grad_norm += (param.grad/h.clip(min=0.01)).norm()**2
+        else:
+            for param in model.parameters():
+                total_grad_norm += param.grad.norm()**2
         total_grad_norm = total_grad_norm.sqrt()
         if torch.isnan(total_grad_norm):
             print("ERROR")
