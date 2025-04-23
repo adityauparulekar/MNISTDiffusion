@@ -94,7 +94,7 @@ for i, (images, labels, indices) in enumerate(sampler):
     loss += loss_fn(pred, noise)
 print("approximating hessian")
 if args.hess:
-    hess = approx_hessian_diag(model, loss, n_probes=100)
+    hess = approx_hessian_diag(model, loss, n_probes=300)
 print("calculating grads")
 
 f = open(args.grad_file, 'a')
@@ -104,21 +104,27 @@ for i, (images, labels, indices) in enumerate(sampler):
     curr_batch = []
     for ind in tqdm(range(len(images))):
         image = images[ind:ind+1].to(device)
-        noise = torch.randn_like(image).to(device)
-
-        pred = model(image,noise)
-        loss = loss_fn(pred, noise)
-        loss.backward()
+        S = 10
         total_grad_norm = 0.0
-        if args.hess:
-            for param, h in zip(model.parameters(), hess):
-                if param.grad is not None:
-                    # print((param.grad/h).norm())
-                    total_grad_norm += (param.grad/h.clip(min=0.01)).norm()**2
-        else:
-            for param in model.parameters():
-                total_grad_norm += param.grad.norm()**2
-        total_grad_norm = total_grad_norm.sqrt()
+        for _ in range(S):
+            model.zero_grad()
+
+            noise = torch.randn_like(image).to(device)
+
+            pred = model(image, noise)
+            loss = loss_fn(pred, noise)
+            loss.backward()
+
+            total = 0.0
+            if args.hess:
+                for param, h in zip(model.parameters(), hess):
+                    if param.grad is not None:
+                        total_grad_norm += (param.grad/h.clip(min=0.01)).norm()**2
+            else:
+                for param in model.parameters():
+                    total_grad_norm += param.grad.norm()**2
+            total_grad_norm += np.sqrt(total)
+        total_grad_norm /= S
         if torch.isnan(total_grad_norm):
             print("ERROR")
             sys.exit(0)

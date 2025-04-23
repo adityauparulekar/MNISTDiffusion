@@ -1,19 +1,14 @@
 #!/bin/bash
-#SBATCH -J didi   # job name
-#SBATCH -o didi.o%j #output and error file name (%j expands to jobID)
+#SBATCH -J mnist_big_model   # job name
+#SBATCH -o mnist_big.o%j #output and error file name (%j expands to jobID)
 #SBATCH -N 1      # total number of mpi tasks requested
 #SBATCH -n 1      # total number of mpi tasks requested
-#SBATCH -p rtx     # queue (partition) -- normal, development, etc.
-#SBATCH -t 48:00:00        # run time (hh:mm:ss)
+#SBATCH -p gh     # queue (partition) -- normal, development, etc.
+#SBATCH -t 6:00:00        # run time (hh:mm:ss)
 #SBATCH --mail-type=all
-#SBATCH --mail-user=didizhou1221@gmail.com
+#SBATCH --mail-user=adityauparulekar@gmail.com
 
-module list
-pwd
-date
-source /home1/07724/didi/.bashrc
-conda activate erasernew
-cd /work2/07724/didi/frontera/bert-rational-model
-export PYTHONPATH=./:${PYTHONPATH}
+conda activate scores 
+cd Documents/MNISTDiffusion
 
-ibrun CUDA_VISIBLE_DEVICES=0 python rationale_benchmark/models/pipeline/bert_pipeline.py --data_dir data/fever/ --output_dir bert_models/fever --model_params params/fever_bert.json
+./runner.sh

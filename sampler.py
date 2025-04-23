@@ -5,7 +5,6 @@ from torch.utils.data import Dataset
 from torchvision import datasets, transforms
 from torch.utils.data import DataLoader
 import numpy as np
-from scipy.stats import norm
 import pandas as pd
 
 class FMNISTSampler():
