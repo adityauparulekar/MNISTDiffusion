@@ -43,6 +43,8 @@ parser.add_argument('--dataset', type=str, default='mnist')
 parser.add_argument('--no_clip',action='store_true',help = 'set to normal sampling method without clip x_0 which could yield unstable samples')
 parser.add_argument('--hess', action='store_true')
 parser.add_argument('--store_grads', action='store_true')
+parser.add_argument("--job_id",   type=int, required=True, help="0-based index of this SLURM array task")
+parser.add_argument("--num_jobs", type=int, required=True, help="total number of SLURM array tasks")
 args = parser.parse_args()
 
 adjust = 1* args.batch_size * args.model_ema_steps / args.epochs
