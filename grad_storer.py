@@ -104,14 +104,19 @@ for i, (images, labels, indices) in enumerate(sampler):
     curr_batch = []
     for ind in tqdm(range(len(images))):
         image = images[ind:ind+1].to(device)
-        S = 10
+        S = 20
         total_grad_norm = 0.0
-        for _ in range(S):
+        for j in range(S):
+            timesteps = torch.ones((len(image),),dtype=torch.int64).to(device)
+            if j < S // 2:
+                time_mult=0
+            else:
+                time_mult=500
             model.zero_grad()
 
             noise = torch.randn_like(image).to(device)
 
-            pred = model(image, noise)
+            pred = model(image, noise, t=timesteps*time_mult)
             loss = loss_fn(pred, noise)
             loss.backward()
 
@@ -119,15 +124,12 @@ for i, (images, labels, indices) in enumerate(sampler):
             if args.hess:
                 for param, h in zip(model.parameters(), hess):
                     if param.grad is not None:
-                        total_grad_norm += (param.grad/h.clip(min=0.01)).norm()**2
+                        total += (param.grad/h.clip(min=0.01)).norm()**2
             else:
                 for param in model.parameters():
-                    total_grad_norm += param.grad.norm()**2
-            total_grad_norm += np.sqrt(total)
+                    total += param.grad.norm()**2
+            total_grad_norm += np.sqrt(total.item())
         total_grad_norm /= S
-        if torch.isnan(total_grad_norm):
-            print("ERROR")
-            sys.exit(0)
         curr_batch.append({
             'image_idx': indices[ind].item(),
             'label': labels[ind].item(),

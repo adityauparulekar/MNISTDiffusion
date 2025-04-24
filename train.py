@@ -155,7 +155,7 @@ def main(args):
 
     global_steps=0
     errors_list = []
-
+    num_images = 0
     for i in range(args.epochs):
         progress_bar = tqdm(total=train_dataloader.length)
         progress_bar.set_description(f"Epoch {i}")
@@ -163,13 +163,12 @@ def main(args):
         model.train()
         avg_loss_this_epoch = 0
         count = 0
-        num_images = 0
         for j,(images, labels, indices) in enumerate(train_dataloader):
 
             images=images.to(device)
             # df_t = torch.randint(0, 10, (1,)).item()*100
 
-            if args.grad_correction:
+            if args.grad_correction and i > 30:
                 # weights, M = dfs[df_t]
                 reweight_images, upweights = rejection_sample(images, indices, weights, M, device)
                 reweight_noise = torch.randn_like(reweight_images).to(device)
