@@ -52,9 +52,9 @@ def get_weights(weights, labels, indices, device):
     return torch.tensor(values, device=device)
     # return torch.tensor([weights['grad_norm'].get(idx.item(), 1) for idx in indices], device=device)
 
-def rejection_sample(images, indices, weights, M, device):
+def rejection_sample(images, labels, indices, weights, M, device):
     inds = indices.squeeze()
-    upweights = get_weights(weights, indices, device)
+    upweights = get_weights(weights, labels, indices, device)
     u = torch.rand(len(inds), device=device)
     reweight_images = images[u < upweights / M]
     upweights = upweights[u < upweights / M]
@@ -158,9 +158,9 @@ def main(args):
             images=images.to(device)
             # df_t = torch.randint(0, 10, (1,)).item()*100
 
-            if args.grad_correction and i > 20:
+            if args.grad_correction:
                 # weights, M = dfs[df_t]
-                reweight_images, upweights = rejection_sample(images, indices, weights, M, device)
+                reweight_images, upweights = rejection_sample(images, labels, indices, weights, M, device)
                 reweight_noise = torch.randn_like(reweight_images).to(device)
                 if len(reweight_images) == 0:
                     continue
