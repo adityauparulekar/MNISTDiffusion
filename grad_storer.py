@@ -86,34 +86,30 @@ def approx_hessian_diag(model, loss, n_probes=10):
 
 loss = 0
 count = 0
-for i, (images, labels, indices) in enumerate(sampler):
-    count += 1
-    if count > 4:
-        break
-    noise = torch.randn_like(images).to(device)
-    pred = model(images, noise)
-
-    loss += loss_fn(pred, noise)
-print("approximating hessian")
 if args.hess:
+    for i, (images, labels, indices) in enumerate(sampler):
+        count += 1
+        if count > 4:
+            break
+        noise = torch.randn_like(images).to(device)
+        pred = model(images, noise)
+
+        loss += loss_fn(pred, noise)
+    print("approximating hessian")
     hess = approx_hessian_diag(model, loss, n_probes=300)
 print("calculating grads")
 
-f = open(args.grad_file, 'a')
+f = open('grads/' + args.grad_file + str(args.job_id) + '.txt', 'a')
 for i, (images, labels, indices) in enumerate(sampler):
     images=images.to(device)    
-    print(i)
     curr_batch = []
     for ind in tqdm(range(len(images))):
         image = images[ind:ind+1].to(device)
-        S = 20
+        S = 40
         total_grad_norm = 0.0
         for j in range(S):
             timesteps = torch.ones((len(image),),dtype=torch.int64).to(device)
-            if j < S // 2:
-                time_mult=0
-            else:
-                time_mult=500
+            time_mult = 0
             model.zero_grad()
 
             noise = torch.randn_like(image).to(device)
@@ -140,4 +136,5 @@ for i, (images, labels, indices) in enumerate(sampler):
         optimizer.zero_grad()
     f.write(str(curr_batch) + "\n")
     f.flush()
+    torch.cuda.empty_cache()
 f.close()
