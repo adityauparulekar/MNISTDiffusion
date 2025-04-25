@@ -40,29 +40,17 @@ def create_mnist_dataloaders(batch_size,image_size=28,num_workers=4):
     return DataLoader(train_dataset,batch_size=batch_size,shuffle=True,num_workers=num_workers),\
             DataLoader(test_dataset,batch_size=batch_size,shuffle=True,num_workers=num_workers)
 
-def process_weights_df(df):
-    df = df.set_index(['image_idx'])
-    df['grad_norm'] /= df['grad_norm'].mean()
-    df['grad_norm'] = df['grad_norm'].clip(lower=0, upper=8)
-    df['grad_norm'] /= df['grad_norm'].mean()
-    # df['grad_norm'] = 1/df['grad_norm']
-    M = df['grad_norm'].max()
-    return (df, M)
-
 def load_weights(f_name):
-    f = open(f_name)
-    lines = f.readlines()
-    a = []
-    print(len(lines))
-    for l in lines:
-        for x in eval(l):
-            a.append(x)
-    df = pd.DataFrame(a)
-    return process_weights_df(df)
+    df = pd.read_csv(f_name)
+    M = df['grad_norm'].max()
+    return df, M
 
-def get_weights(weights, indices, device):
-    return torch.tensor([weights['grad_norm'].get(idx.item(), 1) for idx in indices], device=device)
-    # return torch.tensor(weights.loc[indices]['grad_norm'].to_numpy(), device=device)
+def get_weights(weights, labels, indices, device):
+    idx_to_grad = weights['grad_norm']
+    label_means = weights.groupby('label')['grad_norm'].mean().to_dict()
+    values = [idx_to_grad.get(idx.item(), label_means.get(lbl.item(), 0.0)) for idx, lbl in zip(indices, labels)]
+    return torch.tensor(values, device=device)
+    # return torch.tensor([weights['grad_norm'].get(idx.item(), 1) for idx in indices], device=device)
 
 def rejection_sample(images, indices, weights, M, device):
     inds = indices.squeeze()
