@@ -97,7 +97,8 @@ class MNISTSampler():
         self.batch_size = args.batch_size
         self.length = len(self.dataloader)
         self.device = args.device
-
+        self.job_id = args.job_id
+        self.num_jobs = args.num_jobs
 
     def __iter__(self):
         return self
@@ -111,7 +112,10 @@ class MNISTSampler():
         [images, labels, indices] = current_batch
         images = images.to(self.device)
         
-        return images, labels, indices
+        total_batches = self.length // self.num_jobs
+        start_idx = self.job_id * total_batches
+        end_idx = (self.job_id + 1) * total_batches if self.job_id < self.num_jobs - 1 else self.length
+        return images[start_idx:end_idx], labels[start_idx:end_idx], indices[start_idx:end_idx]
     
 
 
