@@ -166,7 +166,7 @@ def main(args):
                     continue
                 # offset = torch.randint(0, 100, (reweight_images.shape[0],)).to(device)
                 # pred = model(reweight_images, reweight_noise, t = df_t + offset)
-                pred = model(reweight_images, reweight_noise)
+                pred = model(reweight_images, reweight_noise, t=torch.zeros((len(reweight_images),), device=device, dtype=torch.int64))
                 loss_per_sample = ((pred - reweight_noise)**2).mean(dim=[1, 2, 3])
                 loss = (loss_per_sample / upweights).mean()
                 num_images += len(reweight_images)
@@ -178,7 +178,7 @@ def main(args):
                 # offset = torch.randint(0, 100, (images.shape[0],)).to(device)
                 noise = torch.randn_like(images, device=device)
                 # pred = model(images, noise, t=torch.randint(0,args.timesteps,(images.shape[0],)).to(device))
-                pred = model(images, noise)
+                pred = model(images, noise, torch.zeros((len(images),), device=device, dtype=torch.int64))
                 loss = loss_fn(pred, noise)
                 num_images += len(images)
             loss.backward()
