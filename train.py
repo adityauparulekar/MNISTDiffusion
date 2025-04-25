@@ -80,6 +80,8 @@ def parse_args():
     parser.add_argument('--track_losses', type=str, default=None)
     parser.add_argument('--reweight_m', type=float, default=1)
     parser.add_argument('--dataset', type=str, default='mnist')
+    parser.add_argument('--job_id', type=int, default=None)
+    parser.add_argument('--num_jobs', type=int, default=None)
     parser.add_argument('--no_clip',action='store_true',help = 'set to normal sampling method without clip x_0 which could yield unstable samples')
     args = parser.parse_args()
 
@@ -156,7 +158,7 @@ def main(args):
             images=images.to(device)
             # df_t = torch.randint(0, 10, (1,)).item()*100
 
-            if args.grad_correction and i > 30:
+            if args.grad_correction and i > 20:
                 # weights, M = dfs[df_t]
                 reweight_images, upweights = rejection_sample(images, indices, weights, M, device)
                 reweight_noise = torch.randn_like(reweight_images).to(device)
