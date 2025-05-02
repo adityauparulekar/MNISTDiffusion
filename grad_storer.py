@@ -79,6 +79,7 @@ def approx_hessian_diag(model, loss, n_probes=10):
         )
         for i, (v, hv) in enumerate(zip(vs, hvp)):
             diag_est[i] += v * hv
+        torch.cuda.empty_cache()
     for i in range(len(diag_est)):
         diag_est[i] /= n_probes
 
@@ -89,14 +90,14 @@ count = 0
 if args.hess:
     for i, (images, labels, indices) in enumerate(sampler):
         count += 1
-        if count > 4:
+        if count > 2:
             break
         noise = torch.randn_like(images).to(device)
         pred = model(images, noise)
 
         loss += loss_fn(pred, noise)
     print("approximating hessian")
-    hess = approx_hessian_diag(model, loss, n_probes=300)
+    hess = approx_hessian_diag(model, loss, n_probes=100)
 print("calculating grads")
 
 f = open('grads/' + args.grad_file + str(args.job_id) + '.txt', 'a')
@@ -105,7 +106,7 @@ for i, (images, labels, indices) in enumerate(sampler):
     curr_batch = []
     for ind in tqdm(range(len(images))):
         image = images[ind:ind+1].to(device)
-        S = 40
+        S = 100
         total_grad_norm = 0.0
         for j in range(S):
             timesteps = torch.ones((len(image),),dtype=torch.int64).to(device)

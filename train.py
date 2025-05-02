@@ -46,15 +46,17 @@ def load_weights(f_name):
     return df, M
 
 def get_weights(weights, labels, indices, device):
-    idx_to_grad = weights['grad_norm']
-    label_means = weights.groupby('label')['grad_norm'].mean().to_dict()
-    values = [idx_to_grad.get(idx.item(), label_means.get(lbl.item(), 0.0)) for idx, lbl in zip(indices, labels)]
-    return torch.tensor(values, device=device)
-    # return torch.tensor([weights['grad_norm'].get(idx.item(), 1) for idx in indices], device=device)
+    #idx_to_grad = weights['grad_norm']
+    #label_means = weights.groupby('label')['grad_norm'].mean().to_dict()
+    #values = [idx_to_grad.get(idx.item(), label_means.get(lbl.item(), 0.0)) for idx, lbl in zip(indices, labels)]
+    #return torch.tensor(values, device=device)
+    return torch.tensor([weights['grad_norm'].get(idx.item(), 1) for idx in indices], device=device)
 
 def rejection_sample(images, labels, indices, weights, M, device):
     inds = indices.squeeze()
     upweights = get_weights(weights, labels, indices, device)
+    print(upweights)
+    sys.exit(0)
     u = torch.rand(len(inds), device=device)
     reweight_images = images[u < upweights / M]
     upweights = upweights[u < upweights / M]
@@ -146,6 +148,7 @@ def main(args):
     global_steps=0
     errors_list = []
     num_images = 0
+    time=10
     for i in range(args.epochs):
         progress_bar = tqdm(total=train_dataloader.length)
         progress_bar.set_description(f"Epoch {i}")
@@ -156,17 +159,13 @@ def main(args):
         for j,(images, labels, indices) in enumerate(train_dataloader):
 
             images=images.to(device)
-            # df_t = torch.randint(0, 10, (1,)).item()*100
 
-            if args.grad_correction:
-                # weights, M = dfs[df_t]
+            if args.grad_correction and i > 20:
                 reweight_images, upweights = rejection_sample(images, labels, indices, weights, M, device)
                 reweight_noise = torch.randn_like(reweight_images).to(device)
                 if len(reweight_images) == 0:
                     continue
-                # offset = torch.randint(0, 100, (reweight_images.shape[0],)).to(device)
-                # pred = model(reweight_images, reweight_noise, t = df_t + offset)
-                pred = model(reweight_images, reweight_noise, t=torch.zeros((len(reweight_images),), device=device, dtype=torch.int64))
+                pred = model(reweight_images, reweight_noise, t=time*torch.ones((len(reweight_images),), device=device, dtype=torch.int64))
                 loss_per_sample = ((pred - reweight_noise)**2).mean(dim=[1, 2, 3])
                 loss = (loss_per_sample / upweights).mean()
                 num_images += len(reweight_images)
@@ -175,10 +174,8 @@ def main(args):
                 images = images[mask]
                 if len(images) == 0:
                     continue
-                # offset = torch.randint(0, 100, (images.shape[0],)).to(device)
                 noise = torch.randn_like(images, device=device)
-                # pred = model(images, noise, t=torch.randint(0,args.timesteps,(images.shape[0],)).to(device))
-                pred = model(images, noise, torch.zeros((len(images),), device=device, dtype=torch.int64))
+                pred = model(images, noise, time*torch.ones((len(images),), device=device, dtype=torch.int64))
                 loss = loss_fn(pred, noise)
                 num_images += len(images)
             loss.backward()
@@ -210,7 +207,7 @@ def main(args):
         os.makedirs("models",exist_ok=True)
         torch.save(ckpt,f"models/{args.name}.pt")
 
-        if i % 5 == 0:
+        if i % 50 == 0:
             model_ema.eval()
             samples = sample(model_ema, args, device)
             print("DISPLAYING IMAGE")
